@@ -1,6 +1,8 @@
 const db = require("../models");
 const Book = db.Book;
 const { Op } = db.Sequelize;
+const rabbitmq = require("../config/rabbitmq");
+
 // Get all books
 exports.getAllBooks = async (req, res) => {
     try {
@@ -227,6 +229,76 @@ exports.deleteBook = async (req, res) => {
             success: false,
             message: "Failed to delete book",
             error: error.message
+        });
+    }
+};
+
+exports.createBook = async (req, res) => {
+    try {
+        const {
+            title,
+            author,
+            rating,
+            views,
+            is_free,
+            language,
+            sinopsis,
+            story,
+            image,
+        } = req.body;
+        // Validation
+        if (!title || !author || !sinopsis || !story) {
+            return res.status(400).json({
+                success: false,
+                message: "Title, author, sinopsis, and story are required",
+            });
+        }
+        const book = await Book.create({
+            title,
+            author,
+            rating: rating || 0,
+            views: views || 0,
+            is_free: is_free || false,
+            language: language || "English",
+            sinopsis,
+            story,
+            image,
+        });
+        // send data to message broker
+        await rabbitmq.sendToQueue("book_created", {
+            event: "book.created",
+            timestamp: new Date().toISOString(),
+            data: {
+                id: book.id,
+                title: book.title,
+                author: book.author,
+                is_free: book.is_free,
+                language: book.language,
+            },
+        });
+        //end of message broker
+        res.status(201).json({
+            success: true,
+            message: "Book created successfully",
+            data: book,
+        });
+    } catch (error) {
+        console.error("Error creating book:", error);
+        // Handle validation errors
+        if (error.name === "SequelizeValidationError") {
+            return res.status(400).json({
+                success: false,
+                message: "Validation error",
+                errors: error.errors.map((e) => ({
+                    field: e.path,
+                    message: e.message,
+                })),
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: "Failed to create book",
+            error: error.message,
         });
     }
 };
